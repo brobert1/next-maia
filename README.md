@@ -1,19 +1,38 @@
 # next-maia
 
-Run [Maia](https://maiachess.com/) chess ONNX models directly in the browser. Maia is a human-like chess engine trained to play at specific Elo skill levels. This library wraps `onnxruntime-web` and `chess.js` to provide a simple API for evaluating chess positions client-side.
+> Run [Maia2](https://maiachess.com/) chess models entirely in the browser — human-like move predictions conditioned on Elo, powered by `onnxruntime-web`.
+
+[![License: ISC](https://img.shields.io/badge/License-ISC-blue.svg)](https://opensource.org/licenses/ISC)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+
+---
+
+## Overview
+
+**next-maia** is a TypeScript library that brings the [Maia2](https://github.com/CSSLab/maia2) neural network to the browser. Maia2 is trained to play chess the way humans at specific Elo levels actually play — not optimally, but authentically. This library handles the full inference pipeline client-side with no server required.
+
+**Why an opening book?**
+Maia2 was [not trained on the first 5 plies](https://github.com/CSSLab/maia2/issues/5), making its opening play unreliable (e.g. shuffling knights back and forth). next-maia includes a pre-computed ECO opening book that covers the early game, automatically handing off to the neural network once the position leaves the book.
+
+---
 
 ## Features
 
-- **Browser-native inference** — runs ONNX models entirely in the browser via WebAssembly
-- **Automatic model caching** — downloaded models are stored in the Cache API so subsequent loads are instant
-- **Elo-conditioned evaluation** — provide self and opponent Elo ratings (1100–2000) to get human-like move predictions at that skill level
-- **Move probabilities + win probability** — returns a full policy distribution over legal moves and a win-probability score
+- **Browser-native inference** — ONNX model runs entirely in the browser via WebAssembly; no server-side compute needed
+- **ECO opening book** — 3,639 opening lines covering all ECO codes (A–E); weighted-random move selection for natural variety
+- **Automatic model caching** — downloaded models are stored in the [Cache API](https://developer.mozilla.org/en-US/docs/Web/API/Cache) for instant subsequent loads
+- **Elo-conditioned evaluation** — pass self and opponent Elo ratings (1100–2000) to get skill-appropriate move predictions
+- **Full policy distribution** — returns probabilities over all legal moves (UCI notation) and a white win probability
+
+---
 
 ## Installation
 
 ```bash
 npm install next-maia
 ```
+
+---
 
 ## Quick Start
 
@@ -22,93 +41,200 @@ import Maia from "next-maia";
 
 const engine = new Maia({
   modelPath: "/models/maia2.onnx",
-  // optional: custom WASM binary paths for onnxruntime-web
+  // optional: custom paths for onnxruntime-web WASM binaries
   // wasmPaths: "/wasm/",
 });
 
-// Wait for the model to load
+// Wait for the model to load and cache
 await engine.Ready;
 
 // Evaluate a position
-const fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
+const fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
 const result = await engine.evaluate(fen, 1500, 1500);
 
-console.log(result.policy); // { "e7e5": 0.32, "c7c5": 0.18, ... }
-console.log(result.value);  // 0.48 (white win probability)
+console.log(result.policy);   // { "e7e5": 0.32, "c7c5": 0.18, ... }
+console.log(result.value);    // 0.48 — white win probability
+console.log(result.fromBook); // true — move came from the opening book
 ```
+
+---
 
 ## API
 
 ### `new Maia(options)`
 
-Creates a new engine instance and begins loading the ONNX model.
+Creates an engine instance and begins loading the ONNX model asynchronously.
 
 | Option | Type | Required | Description |
 |---|---|---|---|
 | `modelPath` | `string` | Yes | URL or path to the `.onnx` model file |
 | `wasmPaths` | `ort.Env.WasmPrefixOrFilePaths` | No | Custom paths for ONNX Runtime WASM binaries |
+| `externalDataPath` | `string` | No | Path to an external `.onnx.data` file for split models |
 
-### `engine.Ready: Promise<boolean>`
+---
 
-Resolves to `true` once the model has been loaded and is ready for inference.
+### `engine.Ready`
+
+```typescript
+engine.Ready: Promise<boolean>
+```
+
+Resolves to `true` when the model has loaded and is ready for inference. Always `await` this before calling `evaluate`.
+
+---
 
 ### `engine.evaluate(fen, eloSelf, eloOppo)`
 
-Evaluates a chess position and returns move probabilities conditioned on the given Elo ratings.
+```typescript
+engine.evaluate(fen: string, eloSelf: number, eloOppo: number): Promise<EvaluationResult>
+```
+
+Evaluates a chess position. Checks the opening book first; falls back to ONNX inference for positions not in the book.
+
+**Parameters**
 
 | Parameter | Type | Description |
 |---|---|---|
-| `fen` | `string` | Board position in [FEN](https://en.wikipedia.org/wiki/Forsyth%E2%80%93Edwards_Notation) notation |
-| `eloSelf` | `number` | Elo rating of the player to move (1100–2000) |
-| `eloOppo` | `number` | Elo rating of the opponent (1100–2000) |
+| `fen` | `string` | Board position in [FEN notation](https://en.wikipedia.org/wiki/Forsyth%E2%80%93Edwards_Notation) |
+| `eloSelf` | `number` | Elo of the player to move (clamped to 1100–2000) |
+| `eloOppo` | `number` | Elo of the opponent (clamped to 1100–2000) |
 
-**Returns** `Promise<{ policy: Record<string, number>; value: number }>`
+**Returns** `Promise<EvaluationResult>`
 
-- `policy` — object mapping legal moves (UCI notation, e.g. `"e2e4"`) to their predicted probabilities
-- `value` — white's win probability (0 to 1), regardless of whose turn it is
+```typescript
+type EvaluationResult = {
+  policy: Record<string, number>; // UCI move → predicted probability, e.g. { "e2e4": 0.31, ... }
+  value: number;                  // White win probability in [0, 1]
+  fromBook: boolean;              // true if the move was sourced from the opening book
+}
+```
 
-## Architecture
+- When `fromBook` is `true`, `policy` contains a single entry with probability `1` and `value` is `0.5`.
+- When `fromBook` is `false`, `policy` is a full softmax distribution over all legal moves.
+
+---
+
+## How It Works
+
+### Inference pipeline
+
+```
+evaluate(fen, eloSelf, eloOppo)
+  │
+  ├─► Opening book lookup
+  │     Position found  → return book move (weighted random)
+  │     Position not found ↓
+  │
+  ├─► Preprocess FEN
+  │     Mirror board if black's turn (model always sees white's perspective)
+  │     Encode to 18-channel 8×8 float tensor
+  │     Bucket Elo ratings into discrete categories (1100–2000, steps of 100)
+  │     Build legal move mask via chess.js
+  │
+  ├─► ONNX inference (onnxruntime-web / WebAssembly)
+  │     Inputs:  boards [1×18×8×8], elo_self [int64], elo_oppo [int64]
+  │     Outputs: logits_maia (policy head), logits_value (value head)
+  │
+  └─► Post-process
+        Mask illegal moves → softmax → policy probabilities
+        Convert value head → white win probability [0, 1]
+        Mirror moves back if position was flipped
+```
+
+### Board encoding
+
+The board is encoded as an `[1, 18, 8, 8]` float tensor:
+
+| Channels | Content |
+|---|---|
+| 0–5 | White piece occupancy (P, N, B, R, Q, K) |
+| 6–11 | Black piece occupancy (p, n, b, r, q, k) |
+| 12 | Side to move (1.0 = white, 0.0 = black) |
+| 13–16 | Castling rights (K, Q, k, q) |
+| 17 | En passant target square |
+
+### Opening book
+
+The book is pre-computed from the full [ECO opening database](https://www.365chess.com/eco.php) (A00–E99, 3,639 lines). At build time, each opening line is replayed move-by-move and every intermediate position is indexed by its first four FEN fields (ignoring move clocks). The resulting `opening-book.json` maps each position to a frequency-weighted counter of known continuations.
+
+At runtime, `getBookMove` looks up the position, filters to legal moves, and samples proportionally to frequency — so popular moves (e.g. 1. e4, 1. d4) appear more often, while rare sidelines still occur occasionally.
+
+---
+
+## Project Structure
 
 ```
 src/
-├── index.ts              # Entry point — exports the Maia class
-├── constants/            # Board dimensions, Elo ranges, cache key
-├── data/                 # Move-index mapping JSONs (UCI ↔ index)
-├── elo/                  # Maps Elo ratings into discrete categories
-├── encode/               # FEN → 18-channel 8×8 float tensor
-├── mirror/               # Board/move mirroring for black's perspective
+├── index.ts                  # Public entry point — exports Maia class
+├── constants/                # Board dimensions, Elo range, cache key
+├── data/
+│   ├── all_moves.json        # UCI move → model index (8,835 entries)
+│   ├── all_moves_reversed.json
+│   └── opening-book.json     # Pre-computed position → moves map (5,188 positions)
+├── elo/                      # Elo → discrete category mapping
+├── encode/                   # FEN → 18-channel float tensor
+├── mirror/                   # Board and move mirroring (black ↔ white perspective)
 ├── model/
-│   ├── maia.ts           # Maia class (load model, run inference)
-│   ├── session.ts        # ONNX session creation with Cache API
-│   └── process-outputs.ts# Softmax over legal moves, win probability
-└── preprocess/           # Orchestrates encoding, mirroring & masking
+│   ├── maia.ts               # Maia class: constructor, evaluate()
+│   ├── session.ts            # ONNX session creation + Cache API model caching
+│   └── process-outputs.ts    # Softmax, legal move masking, value conversion
+├── openings/                 # Opening book lookup
+└── preprocess/               # Preprocessing orchestration
 ```
 
-### How it works
-
-1. **Preprocessing** — the FEN is parsed with `chess.js`. If it's black's turn, the board is mirrored so the model always sees the position from white's perspective. The board is encoded into an 18-channel 8×8 tensor (12 piece planes + turn + 4 castling + en passant). Elo ratings are bucketed into categories.
-2. **Inference** — the board tensor and Elo category tensors are fed into the ONNX model via `onnxruntime-web`.
-3. **Post-processing** — raw logits are masked to legal moves only, then softmax-normalized into probabilities. The value head output is converted to a white win probability between 0 and 1.
-
-## Dependencies
-
-| Package | Purpose |
-|---|---|
-| [`chess.js`](https://github.com/jhlywa/chess.js) | FEN parsing, legal move generation |
-| [`onnxruntime-web`](https://onnxruntime.ai/) | ONNX model inference via WebAssembly |
+---
 
 ## Development
 
-```bash
-# Install dependencies
-npm install
+### Prerequisites
 
-# Build
+- Node.js 18+
+- npm 9+
+
+### Setup
+
+```bash
+npm install
+```
+
+### Build
+
+```bash
 npm run build
 ```
 
-The compiled output goes to `dist/`.
+Compiles TypeScript to CommonJS in `dist/`.
+
+### Test
+
+```bash
+npm test           # run all tests once
+npm run test:watch # watch mode
+```
+
+Tests cover the four pure modules — opening book, Elo mapping, board mirroring, and tensor encoding — using [Vitest](https://vitest.dev/). The `Maia` class itself is not unit-tested here since it depends on the ONNX runtime and a model file.
+
+### Demo
+
+A full Next.js demo is available in the [`demo/`](demo/) directory. It shows the engine running live in the browser with an interactive chess board, Elo sliders, and a move probability panel.
+
+```bash
+cd demo
+npm install
+npm run dev
+```
+
+---
+
+## Dependencies
+
+| Package | Version | Purpose |
+|---|---|---|
+| [`chess.js`](https://github.com/jhlywa/chess.js) | ^1.4.0 | FEN parsing, legal move generation |
+| [`onnxruntime-web`](https://onnxruntime.ai/) | ^1.24.2 | ONNX model inference via WebAssembly |
+
+---
 
 ## License
 
-ISC
+[ISC](LICENSE)
