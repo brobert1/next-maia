@@ -1,0 +1,21 @@
+{
+  "name": "next-maia",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "Run Maia chess ONNX models in the browser — human-like move predictions conditioned on Elo, powered by onnxruntime-web and chess.js",
+  "dependencies": {
+    "chess.js": "^1.4.0",
+    "onnxruntime-web": "^1.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.0",
+    "typescript": "^5.9.3"
+  }
+}
