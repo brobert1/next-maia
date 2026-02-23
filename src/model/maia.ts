@@ -10,9 +10,14 @@ export class Maia {
   constructor(options: {
     modelPath: string;
     wasmPaths?: ort.Env.WasmPrefixOrFilePaths;
+    externalDataPath?: string;
   }) {
     this.Ready = new Promise((resolve, reject) => {
-      loadSession(options.modelPath, options.wasmPaths)
+      loadSession(
+        options.modelPath,
+        options.wasmPaths,
+        options.externalDataPath,
+      )
         .then((session) => {
           this.model = session;
           resolve(true);

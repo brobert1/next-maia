@@ -19,6 +19,8 @@ Thumbs.db
 *.swo
 *~
 
+demo
+
 # Local / tool config (optional: remove if you want to track)
 .claude/
 
