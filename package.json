@@ -10,7 +10,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "description": "Run Maia chess ONNX models in the browser — human-like move predictions conditioned on Elo, powered by onnxruntime-web and chess.js",
   "dependencies": {
     "chess.js": "^1.4.0",

@@ -2,7 +2,7 @@
 
 > Run [Maia2](https://maiachess.com/) chess models entirely in the browser — human-like move predictions conditioned on Elo, powered by `onnxruntime-web`.
 
-[![License: ISC](https://img.shields.io/badge/License-ISC-blue.svg)](https://opensource.org/licenses/ISC)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
 ---
@@ -34,15 +34,67 @@ npm install next-maia
 
 ---
 
+## Model Preparation: Exporting ONNX Models
+
+Because models are ~280MB, they cannot be bundled directly in the npm package. You must export them and host them (or place them in your web app's `public/` folder).
+
+### 1. Prerequisites
+
+Ensure you are using Python 3.10+ and have cloned the official [maia2 Python repository](https://github.com/CSSLab/maia2).
+
+_Note: If you get an `externally-managed-environment` error, use a virtual environment._
+
+```bash
+# 1. Create and activate a virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# 2. Install dependencies (relaxed versions for compatibility)
+pip install onnx onnxruntime onnxscript gdown
+pip install -e .
+```
+
+### 2. The Export Script
+
+Create `export_onnx.py` in the root of the `maia2` Python repo:
+
+```python
+import torch
+from maia2 import model
+
+for maia_type in ["rapid", "blitz"]:
+    print(f"--- Processing {maia_type.upper()} ---")
+    maia2_model = model.from_pretrained(type=maia_type, device="cpu")
+    maia2_model.eval()
+
+    # Define dummy inputs for tracing
+    dummy_boards = torch.randn(1, 18, 8, 8)
+    dummy_elo = torch.tensor([0], dtype=torch.long)
+
+    torch.onnx.export(
+        maia2_model,
+        (dummy_boards, dummy_elo, dummy_elo),
+        f"maia_{maia_type}_onnx.onnx",
+        export_params=True,
+        opset_version=18,
+        input_names=["boards", "elo_self", "elo_oppo"],
+        output_names=["logits_maia", "logits_side_info", "logits_value"],
+        dynamic_axes={"boards": {0: "batch_size"}, "elo_self": {0: "batch_size"}, "elo_oppo": {0: "batch_size"}}
+    )
+    print(f"Saved maia_{maia_type}_onnx.onnx")
+```
+
+---
+
 ## Quick Start
 
 ```typescript
 import Maia from "next-maia";
 
 const engine = new Maia({
-  modelPath: "/models/maia2.onnx",
-  // optional: custom paths for onnxruntime-web WASM binaries
-  // wasmPaths: "/wasm/",
+  modelPath: "/models/maia_rapid_onnx.onnx", // Update path to point to your exported model
+  // Serve the onnxruntime-web WASM binaries via CDN or locally
+  wasmPaths: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.2/dist/",
 });
 
 // Wait for the model to load and cache
@@ -52,8 +104,8 @@ await engine.Ready;
 const fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
 const result = await engine.evaluate(fen, 1500, 1500);
 
-console.log(result.policy);   // { "e7e5": 0.32, "c7c5": 0.18, ... }
-console.log(result.value);    // 0.48 — white win probability
+console.log(result.policy); // { "e7e5": 0.32, "c7c5": 0.18, ... }
+console.log(result.value); // 0.48 — white win probability
 console.log(result.fromBook); // true — move came from the opening book
 ```
 
@@ -65,11 +117,11 @@ console.log(result.fromBook); // true — move came from the opening book
 
 Creates an engine instance and begins loading the ONNX model asynchronously.
 
-| Option | Type | Required | Description |
-|---|---|---|---|
-| `modelPath` | `string` | Yes | URL or path to the `.onnx` model file |
-| `wasmPaths` | `ort.Env.WasmPrefixOrFilePaths` | No | Custom paths for ONNX Runtime WASM binaries |
-| `externalDataPath` | `string` | No | Path to an external `.onnx.data` file for split models |
+| Option             | Type                            | Required | Description                                            |
+| ------------------ | ------------------------------- | -------- | ------------------------------------------------------ |
+| `modelPath`        | `string`                        | Yes      | URL or path to the `.onnx` model file                  |
+| `wasmPaths`        | `ort.Env.WasmPrefixOrFilePaths` | No       | Custom paths for ONNX Runtime WASM binaries            |
+| `externalDataPath` | `string`                        | No       | Path to an external `.onnx.data` file for split models |
 
 ---
 
@@ -93,20 +145,20 @@ Evaluates a chess position. Checks the opening book first; falls back to ONNX in
 
 **Parameters**
 
-| Parameter | Type | Description |
-|---|---|---|
-| `fen` | `string` | Board position in [FEN notation](https://en.wikipedia.org/wiki/Forsyth%E2%80%93Edwards_Notation) |
-| `eloSelf` | `number` | Elo of the player to move (clamped to 1100–2000) |
-| `eloOppo` | `number` | Elo of the opponent (clamped to 1100–2000) |
+| Parameter | Type     | Description                                                                                     |
+| --------- | -------- | ----------------------------------------------------------------------------------------------- |
+| `fen`     | `string` | Board position in[FEN notation](https://en.wikipedia.org/wiki/Forsyth%E2%80%93Edwards_Notation) |
+| `eloSelf` | `number` | Elo of the player to move (clamped to 1100–2000)                                                |
+| `eloOppo` | `number` | Elo of the opponent (clamped to 1100–2000)                                                      |
 
 **Returns** `Promise<EvaluationResult>`
 
 ```typescript
 type EvaluationResult = {
   policy: Record<string, number>; // UCI move → predicted probability, e.g. { "e2e4": 0.31, ... }
-  value: number;                  // White win probability in [0, 1]
-  fromBook: boolean;              // true if the move was sourced from the opening book
-}
+  value: number; // White win probability in [0, 1]
+  fromBook: boolean; // true if the move was sourced from the opening book
+};
 ```
 
 - When `fromBook` is `true`, `policy` contains a single entry with probability `1` and `value` is `0.5`.
@@ -145,13 +197,13 @@ evaluate(fen, eloSelf, eloOppo)
 
 The board is encoded as an `[1, 18, 8, 8]` float tensor:
 
-| Channels | Content |
-|---|---|
-| 0–5 | White piece occupancy (P, N, B, R, Q, K) |
-| 6–11 | Black piece occupancy (p, n, b, r, q, k) |
-| 12 | Side to move (1.0 = white, 0.0 = black) |
-| 13–16 | Castling rights (K, Q, k, q) |
-| 17 | En passant target square |
+| Channels | Content                                  |
+| -------- | ---------------------------------------- |
+| 0–5      | White piece occupancy (P, N, B, R, Q, K) |
+| 6–11     | Black piece occupancy (p, n, b, r, q, k) |
+| 12       | Side to move (1.0 = white, 0.0 = black)  |
+| 13–16    | Castling rights (K, Q, k, q)             |
+| 17       | En passant target square                 |
 
 ### Opening book
 
@@ -214,27 +266,17 @@ npm run test:watch # watch mode
 
 Tests cover the four pure modules — opening book, Elo mapping, board mirroring, and tensor encoding — using [Vitest](https://vitest.dev/). The `Maia` class itself is not unit-tested here since it depends on the ONNX runtime and a model file.
 
-### Demo
-
-A full Next.js demo is available in the [`demo/`](demo/) directory. It shows the engine running live in the browser with an interactive chess board, Elo sliders, and a move probability panel.
-
-```bash
-cd demo
-npm install
-npm run dev
-```
-
----
-
 ## Dependencies
 
-| Package | Version | Purpose |
-|---|---|---|
-| [`chess.js`](https://github.com/jhlywa/chess.js) | ^1.4.0 | FEN parsing, legal move generation |
-| [`onnxruntime-web`](https://onnxruntime.ai/) | ^1.24.2 | ONNX model inference via WebAssembly |
+| Package                                          | Version | Purpose                              |
+| ------------------------------------------------ | ------- | ------------------------------------ |
+| [`chess.js`](https://github.com/jhlywa/chess.js) | ^1.4.0  | FEN parsing, legal move generation   |
+| [`onnxruntime-web`](https://onnxruntime.ai/)     | ^1.24.2 | ONNX model inference via WebAssembly |
 
 ---
 
 ## License
 
-[ISC](LICENSE)
+[MIT](LICENSE)
+
+_This project relies on the implementation and models provided by the official [Maia-2 project (CSSLab)](https://github.com/CSSLab/maia2), which are licensed under the MIT License and released for broader community usage._
