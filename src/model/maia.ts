@@ -30,7 +30,7 @@ export class Maia {
   async evaluate(
     board: string,
     eloSelf: number,
-    eloOppo: number,
+    eloOppo: number = eloSelf,
   ): Promise<{
     policy: Record<string, number>;
     value: number;
@@ -78,7 +78,7 @@ export class Maia {
   async pickMove(
     board: string,
     eloSelf: number,
-    eloOppo: number,
+    eloOppo: number = eloSelf,
   ): Promise<{ move: string; fromBook: boolean }> {
     // Clamp the model Elo to the trained range so the neural network always
     // uses the closest available embedding. Weakness for sub-1100 play is
