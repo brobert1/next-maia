@@ -1,39 +1,13 @@
 import { ELO_END, ELO_INTERVAL, ELO_START } from "../constants";
 
-export function createEloDict(): Record<string, number> {
-  const eloDict: Record<string, number> = { [`<${ELO_START}`]: 0 };
-  let rangeIndex = 1;
-
-  for (
-    let lowerBound = ELO_START;
-    lowerBound < ELO_END;
-    lowerBound += ELO_INTERVAL
-  ) {
-    const upperBound = lowerBound + ELO_INTERVAL;
-    eloDict[`${lowerBound}-${upperBound - 1}`] = rangeIndex;
-    rangeIndex += 1;
-  }
-
-  eloDict[`>=${ELO_END}`] = rangeIndex;
-  return eloDict;
-}
-
-export function mapToCategory(
-  elo: number,
-  eloDict: Record<string, number>,
-): number {
-  if (elo < ELO_START) return eloDict[`<${ELO_START}`];
-  if (elo >= ELO_END) return eloDict[`>=${ELO_END}`];
-
-  for (
-    let lowerBound = ELO_START;
-    lowerBound < ELO_END;
-    lowerBound += ELO_INTERVAL
-  ) {
-    const upperBound = lowerBound + ELO_INTERVAL;
-    if (elo >= lowerBound && elo < upperBound) {
-      return eloDict[`${lowerBound}-${upperBound - 1}`];
-    }
-  }
-  throw new Error("Elo value is out of range.");
+/**
+ * Maps an Elo rating to the discrete category index used by the model.
+ * Category 0  = below ELO_START (< 1100)
+ * Categories 1–9 = 100-point buckets from 1100 to 1999
+ * Category 10 = ELO_END and above (>= 2000)
+ */
+export function mapToCategory(elo: number): number {
+  if (elo < ELO_START) return 0;
+  if (elo >= ELO_END) return (ELO_END - ELO_START) / ELO_INTERVAL + 1;
+  return Math.floor((elo - ELO_START) / ELO_INTERVAL) + 1;
 }

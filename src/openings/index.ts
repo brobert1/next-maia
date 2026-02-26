@@ -1,7 +1,17 @@
 import { Chess } from "chess.js";
 import bookData from "../data/opening-book.json";
 
-const book = bookData as Record<string, Record<string, number>>;
+// opening-book.json stores moves as compact "move:freq,move:freq" strings.
+// Parse them back into Record<string, number> once at module load time.
+const book: Record<string, Record<string, number>> = {};
+for (const [key, val] of Object.entries(bookData as Record<string, string>)) {
+  const moves: Record<string, number> = {};
+  for (const part of val.split(",")) {
+    const colon = part.indexOf(":");
+    moves[part.slice(0, colon)] = Number(part.slice(colon + 1));
+  }
+  book[key] = moves;
+}
 
 /** Returns the position key: first 4 FEN fields (ignores move clocks) */
 function positionKey(fen: string): string {
