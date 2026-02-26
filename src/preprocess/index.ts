@@ -1,11 +1,13 @@
 import { Chess } from "chess.js";
 import { boardToTensor } from "../encode/board-to-tensor";
 import { mirrorFEN } from "../mirror";
-import { createEloDict, mapToCategory } from "../elo";
-import allPossibleMovesDict from "../data/all_moves.json";
+import { mapToCategory } from "../elo";
+import allPossibleMovesArray from "../data/all_moves.json";
 
-const allPossibleMoves = allPossibleMovesDict as Record<string, number>;
-const eloDict = createEloDict();
+// Build move→index lookup once at load time from the flat sorted array
+const allPossibleMoves: Record<string, number> = Object.fromEntries(
+  (allPossibleMovesArray as string[]).map((move, index) => [move, index]),
+);
 
 export function preprocess(
   fen: string,
@@ -27,8 +29,8 @@ export function preprocess(
   }
 
   const boardInput = boardToTensor(board.fen());
-  const eloSelfCategory = mapToCategory(eloSelf, eloDict);
-  const eloOppoCategory = mapToCategory(eloOppo, eloDict);
+  const eloSelfCategory = mapToCategory(eloSelf);
+  const eloOppoCategory = mapToCategory(eloOppo);
 
   // Mask out illegal moves
   const legalMoves = new Float32Array(Object.keys(allPossibleMoves).length);

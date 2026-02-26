@@ -1,11 +1,9 @@
 import * as ort from "onnxruntime-web";
 import { mirrorMove } from "../mirror";
-import allPossibleMovesReversedDict from "../data/all_moves_reversed.json";
+import allPossibleMovesArray from "../data/all_moves.json";
 
-const allPossibleMovesReversed = allPossibleMovesReversedDict as Record<
-  number,
-  string
->;
+// Flat sorted array: index → move string (derived at load time, O(1) lookup)
+const allPossibleMovesReversed = allPossibleMovesArray as string[];
 
 export function processOutputs(
   fen: string,
