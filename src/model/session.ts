@@ -12,10 +12,22 @@ export async function loadSession(
 
   const buffer = await getCachedModel(modelPath);
 
+  // Prefer GPU-accelerated backends to avoid the WASM heap size limit.
+  // On devices that support WebGPU or WebNN the model weights are loaded into
+  // GPU/NPU memory rather than the WebAssembly heap, which prevents the
+  // "RangeError: Out of memory" crash seen on mobile with the 89 MB weight file.
+  // Falls back to wasm on unsupported devices.
+  const executionProviders: ort.InferenceSession.ExecutionProviderConfig[] = [
+    "webgpu",
+    "webnn",
+    "wasm",
+  ];
+
   if (externalDataPath) {
     const externalDataBuffer = await getCachedModel(externalDataPath);
     const fileName = externalDataPath.split("/").pop() || externalDataPath;
     return ort.InferenceSession.create(buffer, {
+      executionProviders,
       externalData: [
         {
           path: fileName,
@@ -25,7 +37,7 @@ export async function loadSession(
     });
   }
 
-  return ort.InferenceSession.create(buffer);
+  return ort.InferenceSession.create(buffer, { executionProviders });
 }
 
 async function getCachedModel(url: string): Promise<ArrayBuffer> {
