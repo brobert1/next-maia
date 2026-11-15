@@ -1,2 +1,2 @@
-import Maia from "./model";
-export default Maia;
+export { default } from "./model/maia.js";
+export type { EvaluationResult, MaiaOptions } from "./model/maia.js";

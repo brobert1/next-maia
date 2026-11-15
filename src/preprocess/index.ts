@@ -1,13 +1,10 @@
 import { Chess } from "chess.js";
-import { boardToTensor } from "../encode/board-to-tensor";
-import { mirrorFEN } from "../mirror";
-import { mapToCategory } from "../elo";
-import allPossibleMovesArray from "../data/all_moves.json";
+import { boardToTensor } from "../encode/board-to-tensor.js";
+import { mirrorFEN } from "../mirror/index.js";
+import { mapToCategory } from "../elo/index.js";
+import { ALL_MOVES } from "../data/all-moves.js";
 
-// Build move→index lookup once at load time from the flat sorted array
-const allPossibleMoves: Record<string, number> = Object.fromEntries(
-  (allPossibleMovesArray as string[]).map((move, index) => [move, index]),
-);
+const MOVE_INDEX = new Map(ALL_MOVES.map((move, index) => [move, index]));
 
 export function preprocess(
   fen: string,
@@ -17,7 +14,8 @@ export function preprocess(
   boardInput: Float32Array;
   eloSelfCategory: number;
   eloOppoCategory: number;
-  legalMoves: Float32Array;
+  /** Policy indices (into ALL_MOVES) of the legal moves, as the model sees the board. */
+  legalMoves: number[];
 } {
   let board = new Chess(fen);
 
@@ -32,13 +30,10 @@ export function preprocess(
   const eloSelfCategory = mapToCategory(eloSelf);
   const eloOppoCategory = mapToCategory(eloOppo);
 
-  // Mask out illegal moves
-  const legalMoves = new Float32Array(Object.keys(allPossibleMoves).length);
+  const legalMoves: number[] = [];
   for (const move of board.moves({ verbose: true })) {
-    const moveIndex = allPossibleMoves[move.lan];
-    if (moveIndex !== undefined) {
-      legalMoves[moveIndex] = 1.0;
-    }
+    const moveIndex = MOVE_INDEX.get(move.lan);
+    if (moveIndex !== undefined) legalMoves.push(moveIndex);
   }
 
   return { boardInput, eloSelfCategory, eloOppoCategory, legalMoves };

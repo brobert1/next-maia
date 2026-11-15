@@ -1,29 +1,41 @@
 import * as ort from "onnxruntime-web";
-import { loadSession, TENSOR_SHAPE } from "./session";
-import { processOutputs } from "./process-outputs";
-import { preprocess } from "../preprocess";
-import { getBookMove } from "../openings";
+import { TENSOR_SHAPE } from "../constants/index.js";
+import { loadSession } from "./session.js";
+import { processOutputs } from "./process-outputs.js";
+import { preprocess } from "../preprocess/index.js";
+import { getBookMove } from "../openings/index.js";
+
+export interface MaiaOptions {
+  /** URL of the Maia2 `.onnx` model. */
+  modelPath: string;
+  /** Where onnxruntime-web loads its WASM files from. Must match the installed onnxruntime-web version. */
+  wasmPaths?: ort.Env.WasmPrefixOrFilePaths;
+  /** URL of an external `.onnx.data` weights file, for split models. */
+  externalDataPath?: string;
+}
+
+export interface EvaluationResult {
+  /** UCI move → probability. A single move with probability 1 when `fromBook`. */
+  policy: Record<string, number>;
+  /** White win probability in [0, 1]. Always 0.5 when `fromBook`. */
+  value: number;
+  /** Whether the move came from the opening book rather than the model. */
+  fromBook: boolean;
+}
 
 export class Maia {
+  /** Resolves once the model is loaded; rejects if loading fails. */
   public Ready: Promise<boolean>;
   public model!: ort.InferenceSession;
 
-  constructor(options: {
-    modelPath: string;
-    wasmPaths?: ort.Env.WasmPrefixOrFilePaths;
-    externalDataPath?: string;
-  }) {
-    this.Ready = new Promise((resolve, reject) => {
-      loadSession(
-        options.modelPath,
-        options.wasmPaths,
-        options.externalDataPath,
-      )
-        .then((session) => {
-          this.model = session;
-          resolve(true);
-        })
-        .catch(reject);
+  constructor(options: MaiaOptions) {
+    this.Ready = loadSession(
+      options.modelPath,
+      options.wasmPaths,
+      options.externalDataPath,
+    ).then((session) => {
+      this.model = session;
+      return true;
     });
   }
 
@@ -31,11 +43,7 @@ export class Maia {
     board: string,
     eloSelf: number,
     eloOppo: number = eloSelf,
-  ): Promise<{
-    policy: Record<string, number>;
-    value: number;
-    fromBook: boolean;
-  }> {
+  ): Promise<EvaluationResult> {
     const bookMove = getBookMove(board);
     if (bookMove) {
       return { policy: { [bookMove]: 1 }, value: 0.5, fromBook: true };
@@ -56,10 +64,17 @@ export class Maia {
       ),
     };
 
+    // Book moves above don't need the model, so they work while it is still loading.
+    await this.Ready;
     const { logits_maia, logits_value } = await this.model.run(feeds);
 
     return {
-      ...processOutputs(board, logits_maia, logits_value, legalMoves),
+      ...processOutputs(
+        board,
+        logits_maia.data as Float32Array,
+        (logits_value.data as Float32Array)[0],
+        legalMoves,
+      ),
       fromBook: false,
     };
   }
@@ -87,6 +102,9 @@ export class Maia {
     const { policy, fromBook } = await this.evaluate(board, modelElo, eloOppo);
 
     const entries = Object.entries(policy);
+    if (entries.length === 0) {
+      throw new Error(`No legal moves in position: ${board}`);
+    }
 
     // Opening book moves are always played as-is.
     // Above 1100 the pure Maia policy is used unchanged.

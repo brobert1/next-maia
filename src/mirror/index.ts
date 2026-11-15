@@ -13,31 +13,19 @@ export function mirrorFEN(fen: string): string {
   const [position, activeColor, castling, enPassant, halfmove, fullmove] =
     fen.split(" ");
 
-  const mirroredPosition = position
-    .split("/")
-    .reverse()
-    .map(swapColorsInRank)
-    .join("/");
-
   return [
-    mirroredPosition,
+    position.split("/").reverse().map(swapCase).join("/"),
     activeColor === "w" ? "b" : "w",
-    swapCastlingRights(castling),
+    swapCase(castling),
     enPassant !== "-" ? mirrorSquare(enPassant) : "-",
     halfmove,
     fullmove,
   ].join(" ");
 }
 
-function swapColorsInRank(rank: string): string {
-  return rank.replace(/[A-Za-z]/g, (c) =>
-    c === c.toUpperCase() ? c.toLowerCase() : c.toUpperCase(),
-  );
-}
-
-function swapCastlingRights(castling: string): string {
-  if (castling === "-") return castling;
-  return castling.replace(/[A-Za-z]/g, (c) =>
+/** Swaps piece colors in a FEN rank, or sides in a castling field ("-" is unchanged). */
+function swapCase(text: string): string {
+  return text.replace(/[A-Za-z]/g, (c) =>
     c === c.toUpperCase() ? c.toLowerCase() : c.toUpperCase(),
   );
 }

@@ -1,4 +1,4 @@
-import { BOARD_CHANNELS, BOARD_SIZE } from "../constants";
+import { BOARD_CHANNELS, BOARD_SIZE } from "../constants/index.js";
 
 const PIECE_TYPES = [
   "P",

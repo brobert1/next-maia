@@ -1,4 +1,4 @@
-import { ELO_END, ELO_INTERVAL, ELO_START } from "../constants";
+import { ELO_END, ELO_INTERVAL, ELO_START } from "../constants/index.js";
 
 /**
  * Maps an Elo rating to the discrete category index used by the model.

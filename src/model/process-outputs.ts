@@ -1,47 +1,33 @@
-import * as ort from "onnxruntime-web";
-import { mirrorMove } from "../mirror";
-import allPossibleMovesArray from "../data/all_moves.json";
+import { mirrorMove } from "../mirror/index.js";
+import { ALL_MOVES } from "../data/all-moves.js";
 
-// Flat sorted array: index → move string (derived at load time, O(1) lookup)
-const allPossibleMovesReversed = allPossibleMovesArray as string[];
-
+/**
+ * Softmaxes the logits of the legal moves into a policy and converts the value
+ * head into a white win probability. For black to move the model saw a mirrored
+ * board, so moves are mirrored back and the value is flipped.
+ */
 export function processOutputs(
   fen: string,
-  logitsMaia: ort.Tensor,
-  logitsValue: ort.Tensor,
-  legalMoves: Float32Array,
+  logits: Float32Array,
+  rawValue: number,
+  legalMoves: number[],
 ): { policy: Record<string, number>; value: number } {
-  const logits = logitsMaia.data as Float32Array;
-  const value = logitsValue.data as Float32Array;
-
-  let winProb = Math.min(Math.max((value[0] as number) / 2 + 0.5, 0), 1);
   const blackFlag = fen.split(" ")[1] === "b";
-  if (blackFlag) {
-    winProb = 1 - winProb;
-  }
+
+  let winProb = Math.min(Math.max(rawValue / 2 + 0.5, 0), 1);
+  if (blackFlag) winProb = 1 - winProb;
   winProb = Math.round(winProb * 10000) / 10000;
 
-  const legalMoveIndices = legalMoves
-    .map((val, index) => (val > 0 ? index : -1))
-    .filter((index) => index !== -1);
-
-  const legalMovesMirrored: string[] = [];
-  for (const moveIndex of legalMoveIndices) {
-    let move = allPossibleMovesReversed[moveIndex];
-    if (blackFlag) move = mirrorMove(move);
-    legalMovesMirrored.push(move);
-  }
-
-  const legalLogits = legalMoveIndices.map((idx) => logits[idx]);
+  const legalLogits = legalMoves.map((index) => logits[index]);
   const maxLogit = Math.max(...legalLogits);
-  const expLogits = legalLogits.map((logit) => Math.exp(logit - maxLogit));
-  const sumExp = expLogits.reduce((a, b) => a + b, 0);
-  const probs = expLogits.map((expLogit) => expLogit / sumExp);
+  const exps = legalLogits.map((logit) => Math.exp(logit - maxLogit));
+  const sumExp = exps.reduce((a, b) => a + b, 0);
 
-  const moveProbs: Record<string, number> = {};
-  for (let i = 0; i < legalMoveIndices.length; i++) {
-    moveProbs[legalMovesMirrored[i]] = probs[i];
-  }
+  const policy: Record<string, number> = {};
+  legalMoves.forEach((moveIndex, i) => {
+    const move = ALL_MOVES[moveIndex];
+    policy[blackFlag ? mirrorMove(move) : move] = exps[i] / sumExp;
+  });
 
-  return { policy: moveProbs, value: winProb };
+  return { policy, value: winProb };
 }

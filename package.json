@@ -1,35 +1,51 @@
 {
   "name": "next-maia",
-  "version": "1.1.0",
+  "version": "1.2.0",
+  "description": "Run Maia chess ONNX models in the browser — human-like move predictions conditioned on Elo, powered by onnxruntime-web and chess.js",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     }
   },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "rm -rf dist && tsc",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepublishOnly": "npm run build && npm run test"
+    "prepublishOnly": "npm run build && npm test && node -e \"import('./dist/index.js')\""
   },
-  "keywords": [],
+  "keywords": [
+    "chess",
+    "maia",
+    "maia2",
+    "onnx",
+    "onnxruntime-web",
+    "elo",
+    "browser",
+    "chess-engine"
+  ],
   "author": "",
   "license": "MIT",
-  "description": "Run Maia chess ONNX models in the browser — human-like move predictions conditioned on Elo, powered by onnxruntime-web and chess.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/brobert1/next-maia.git"
+  },
+  "homepage": "https://github.com/brobert1/next-maia#readme",
+  "bugs": {
+    "url": "https://github.com/brobert1/next-maia/issues"
+  },
   "dependencies": {
     "chess.js": "^1.4.0",
     "onnxruntime-web": "^1.24.2"
   },
   "devDependencies": {
-    "@types/node": "^25.3.0",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.4"
+    "vitest": "^5.1.0"
   }
 }

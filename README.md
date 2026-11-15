@@ -90,23 +90,28 @@ for maia_type in ["rapid", "blitz"]:
 
 ```typescript
 import Maia from "next-maia";
+import { env } from "onnxruntime-web";
 
 const engine = new Maia({
   modelPath: "/models/maia_rapid_onnx.onnx", // Update path to point to your exported model
-  // Serve the onnxruntime-web WASM binaries via CDN or locally
-  wasmPaths: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.2/dist/",
+  // Serve the onnxruntime-web WASM binaries via CDN or locally.
+  // They must match the installed onnxruntime-web version exactly, hence env.versions.web.
+  wasmPaths: `https://cdn.jsdelivr.net/npm/onnxruntime-web@${env.versions.web}/dist/`,
 });
 
-// Wait for the model to load and cache
+// Wait for the model to download (first visit) or load from cache
 await engine.Ready;
 
-// Evaluate a position
-const fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
+// Evaluate a position out of book
+const fen = "r1bqkb1r/pp3ppp/2n1pn2/2pp4/3P4/2PBPN2/PP3PPP/RNBQK2R w KQkq - 3 6";
 const result = await engine.evaluate(fen, 1500, 1500);
 
-console.log(result.policy); // { "e7e5": 0.32, "c7c5": 0.18, ... }
-console.log(result.value); // 0.48 — white win probability
-console.log(result.fromBook); // true — move came from the opening book
+console.log(result.policy); // { "e1g1": 0.41, "b1d2": 0.17, ... }
+console.log(result.value); // 0.53 — white win probability
+console.log(result.fromBook); // false — move distribution came from the model
+
+// Or let the engine choose a move, sampled like a human of that rating would
+const { move } = await engine.pickMove(fen, 1200);
 ```
 
 ---
@@ -120,8 +125,12 @@ Creates an engine instance and begins loading the ONNX model asynchronously.
 | Option             | Type                            | Required | Description                                            |
 | ------------------ | ------------------------------- | -------- | ------------------------------------------------------ |
 | `modelPath`        | `string`                        | Yes      | URL or path to the `.onnx` model file                  |
-| `wasmPaths`        | `ort.Env.WasmPrefixOrFilePaths` | No       | Custom paths for ONNX Runtime WASM binaries            |
+| `wasmPaths`        | `ort.Env.WasmPrefixOrFilePaths` | No       | Custom paths for ONNX Runtime WASM binaries (must match the installed onnxruntime-web version) |
 | `externalDataPath` | `string`                        | No       | Path to an external `.onnx.data` file for split models |
+
+The options object is exported as the `MaiaOptions` type.
+
+The model is stored in the [Cache API](https://developer.mozilla.org/en-US/docs/Web/API/Cache) after the first download. Where the Cache API is unavailable (plain `http://` origins, some private modes) or full, the model still loads, just without caching.
 
 ---
 
@@ -131,7 +140,7 @@ Creates an engine instance and begins loading the ONNX model asynchronously.
 engine.Ready: Promise<boolean>
 ```
 
-Resolves to `true` when the model has loaded and is ready for inference. Always `await` this before calling `evaluate`.
+Resolves to `true` when the model has loaded and is ready for inference, and rejects if loading fails. `evaluate` and `pickMove` wait for it automatically, and opening-book positions are answered even before the model has finished downloading.
 
 ---
 
@@ -148,10 +157,10 @@ Evaluates a chess position. Checks the opening book first; falls back to ONNX in
 | Parameter | Type     | Description                                                                                     |
 | --------- | -------- | ----------------------------------------------------------------------------------------------- |
 | `fen`     | `string` | Board position in[FEN notation](https://en.wikipedia.org/wiki/Forsyth%E2%80%93Edwards_Notation) |
-| `eloSelf` | `number` | Elo of the player to move (clamped to 1100–2000)                                                |
-| `eloOppo` | `number` | Elo of the opponent (clamped to 1100–2000)                                                      |
+| `eloSelf` | `number` | Elo of the player to move (100-point buckets from 1100 to 2000; below/above use the edge buckets) |
+| `eloOppo` | `number` | Elo of the opponent (same bucketing; defaults to `eloSelf`)                                     |
 
-**Returns** `Promise<EvaluationResult>`
+**Returns** `Promise<EvaluationResult>` (exported type)
 
 ```typescript
 type EvaluationResult = {
@@ -163,6 +172,16 @@ type EvaluationResult = {
 
 - When `fromBook` is `true`, `policy` contains a single entry with probability `1` and `value` is `0.5`.
 - When `fromBook` is `false`, `policy` is a full softmax distribution over all legal moves.
+
+---
+
+### `engine.pickMove(fen, eloSelf, eloOppo)`
+
+```typescript
+engine.pickMove(fen: string, eloSelf: number, eloOppo?: number): Promise<{ move: string; fromBook: boolean }>
+```
+
+Picks one move (UCI) by sampling from the `evaluate` policy, so the engine plays with human-like variety rather than always choosing the top move. Below 1100 Elo the policy is blended with a uniform distribution (fully random at 500) to imitate weaker play. Throws if the position has no legal moves.
 
 ---
 
@@ -207,7 +226,7 @@ The board is encoded as an `[1, 18, 8, 8]` float tensor:
 
 ### Opening book
 
-The book is pre-computed from the full [ECO opening database](https://www.365chess.com/eco.php) (A00–E99, 3,639 lines). At build time, each opening line is replayed move-by-move and every intermediate position is indexed by its first four FEN fields (ignoring move clocks). The resulting `opening-book.json` maps each position to a frequency-weighted counter of known continuations.
+The book is pre-computed from the full [ECO opening database](https://www.365chess.com/eco.php) (A00–E99, 3,639 lines). At build time, each opening line is replayed move-by-move and every intermediate position is indexed by its first four FEN fields (ignoring move clocks). The resulting `opening-book.ts` maps each position to a frequency-weighted counter of known continuations.
 
 At runtime, `getBookMove` looks up the position, filters to legal moves, and samples proportionally to frequency — so popular moves (e.g. 1. e4, 1. d4) appear more often, while rare sidelines still occur occasionally.
 
@@ -220,14 +239,13 @@ src/
 ├── index.ts                  # Public entry point — exports Maia class
 ├── constants/                # Board dimensions, Elo range, cache key
 ├── data/
-│   ├── all_moves.json        # UCI move → model index (8,835 entries)
-│   ├── all_moves_reversed.json
-│   └── opening-book.json     # Pre-computed position → moves map (5,188 positions)
+│   ├── all-moves.ts          # Policy index → UCI move (1,880 moves, in model output order)
+│   └── opening-book.ts       # Pre-computed position → moves map (5,188 positions)
 ├── elo/                      # Elo → discrete category mapping
 ├── encode/                   # FEN → 18-channel float tensor
 ├── mirror/                   # Board and move mirroring (black ↔ white perspective)
 ├── model/
-│   ├── maia.ts               # Maia class: constructor, evaluate()
+│   ├── maia.ts               # Maia class: constructor, evaluate(), pickMove()
 │   ├── session.ts            # ONNX session creation + Cache API model caching
 │   └── process-outputs.ts    # Softmax, legal move masking, value conversion
 ├── openings/                 # Opening book lookup
@@ -240,7 +258,7 @@ src/
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 22.12+
 - npm 9+
 
 ### Setup
@@ -255,7 +273,7 @@ npm install
 npm run build
 ```
 
-Compiles TypeScript to CommonJS in `dist/`.
+Compiles TypeScript to ES modules plus type declarations in `dist/`.
 
 ### Test
 
@@ -264,7 +282,7 @@ npm test           # run all tests once
 npm run test:watch # watch mode
 ```
 
-Tests cover the four pure modules — opening book, Elo mapping, board mirroring, and tensor encoding — using [Vitest](https://vitest.dev/). The `Maia` class itself is not unit-tested here since it depends on the ONNX runtime and a model file.
+Tests use [Vitest](https://vitest.dev/) and cover the opening book, Elo mapping, board mirroring, tensor encoding, policy/value post-processing, and model download caching. ONNX inference itself is not unit-tested, since it needs a model file.
 
 ## Dependencies
 

@@ -1,5 +1,5 @@
 import * as ort from "onnxruntime-web";
-import { MODEL_CACHE_NAME, TENSOR_SHAPE } from "../constants";
+import { MODEL_CACHE_NAME } from "../constants/index.js";
 
 export async function loadSession(
   modelPath: string,
@@ -10,7 +10,7 @@ export async function loadSession(
     ort.env.wasm.wasmPaths = wasmPaths;
   }
 
-  const buffer = await getCachedModel(modelPath);
+  const buffer = await fetchModel(modelPath);
   const externalData = externalDataPath
     ? await resolveExternalData(externalDataPath)
     : undefined;
@@ -51,22 +51,45 @@ export async function loadSession(
 async function resolveExternalData(
   externalDataPath: string,
 ): Promise<ort.InferenceSession.SessionOptions["externalData"]> {
-  const dataBuffer = await getCachedModel(externalDataPath);
+  const dataBuffer = await fetchModel(externalDataPath);
   const fileName = externalDataPath.split("/").pop() || externalDataPath;
   return [{ path: fileName, data: new Uint8Array(dataBuffer) }];
 }
 
-async function getCachedModel(url: string): Promise<ArrayBuffer> {
-  const cache = await caches.open(MODEL_CACHE_NAME);
-  const cached = await cache.match(url);
+/**
+ * Downloads a model file through the Cache API so later visits skip the download.
+ * Falls back to an uncached fetch when the Cache API is unavailable (insecure
+ * context, some private modes) or full.
+ */
+export async function fetchModel(url: string): Promise<ArrayBuffer> {
+  let cache: Cache | undefined;
+  try {
+    cache = await caches.open(MODEL_CACHE_NAME);
+  } catch {
+    // No Cache API here: load uncached.
+  }
+
+  const cached = await cache?.match(url);
   if (cached) return cached.arrayBuffer();
 
-  const fetchResponse = await fetch(url);
-  if (!fetchResponse.ok) {
-    throw new Error(`Failed to fetch model: ${url}`);
+  const response = await fetchOk(url);
+  if (!cache) return response.arrayBuffer();
+  try {
+    // Stream into the cache and read it back once. Using response.clone()
+    // instead would buffer a second full copy of the model in memory.
+    await cache.put(url, response);
+    const stored = await cache.match(url);
+    if (stored) return stored.arrayBuffer();
+  } catch {
+    // Quota exceeded: the body is spent, so download again uncached.
   }
-  await cache.put(url, fetchResponse.clone());
-  return fetchResponse.arrayBuffer();
+  return (await fetchOk(url)).arrayBuffer();
 }
 
-export { TENSOR_SHAPE };
+async function fetchOk(url: string): Promise<Response> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch model: ${url} (HTTP ${response.status})`);
+  }
+  return response;
+}
