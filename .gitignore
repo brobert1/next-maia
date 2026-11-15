@@ -31,3 +31,6 @@ demo
 # .npm
 # .yarn/
 # .pnpm-debug.log*
+
+# Local AI planning docs
+docs/superpowers/
